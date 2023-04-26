@@ -11,6 +11,8 @@
 #ifndef MRDOX_TESTS_SINGLE_FILE_HPP
 #define MRDOX_TESTS_SINGLE_FILE_HPP
 
+#include "TestConfig.hpp"
+
 #include <clang/Tooling/CompilationDatabase.h>
 #include <string>
 #include <utility>
@@ -25,15 +27,19 @@ class SingleFile
     : public tooling::CompilationDatabase
 {
     std::vector<tooling::CompileCommand> cc_;
-
 public:
     SingleFile(
         llvm::StringRef dir,
-        llvm::StringRef file)
+        llvm::StringRef file,
+        const TestConfig &tc)
     {
         std::vector<std::string> cmds;
         cmds.emplace_back("clang");
-        cmds.emplace_back("-std=c++20");
+        llvm::raw_string_ostream{cmds.emplace_back()} << "-std=" << tc.cxxstd;
+
+        for (const auto & fl : tc.compile_flags)
+            cmds.emplace_back(fl);
+
         cmds.emplace_back("-pedantic-errors");
         cmds.emplace_back("-Werror");
         cmds.emplace_back(file);
@@ -42,7 +48,7 @@ public:
             file,
             std::move(cmds),
             dir);
-        cc_.back().Heuristic = "unit test";
+        cc_.back().Heuristic = tc.heuristics;
     }
 
     std::vector<tooling::CompileCommand>

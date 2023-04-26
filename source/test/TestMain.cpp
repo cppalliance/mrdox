@@ -10,6 +10,7 @@
 
 #include "test/Options.hpp"
 #include "test/SingleFile.hpp"
+#include "test/TestConfig.hpp"
 #include "api/ConfigImpl.hpp"
 #include <mrdox/Config.hpp>
 #include "api/Support/Debug.hpp"
@@ -80,6 +81,11 @@ class Instance
     Generator const* xmlGen_;
     Generator const* adocGen_;
 
+    TestConfig testConfig_;
+
+    void
+    setConfig(
+        std::shared_ptr<Config> config);
     std::shared_ptr<Config const>
     makeConfig(
         llvm::StringRef workingDir);
@@ -160,7 +166,7 @@ makeConfig(
 
     std::error_code ec;
     auto config = loadConfigString(
-        workingDir, configYaml, 
+        workingDir, configYaml,
         ec);
     Assert(! ec);
     return config;
@@ -211,11 +217,24 @@ handleFile(
 
     // Build Corpus
     std::unique_ptr<Corpus> corpus;
+
+    auto tcs = TestConfig::loadForTest(dirPath, filePath);
+    if (!tcs)
+        return tcs.takeError();
+
+    for (const auto & tc : *tcs)
     {
-        SingleFile db(dirPath, filePath);
+        SingleFile db(dirPath, filePath, tc);
         tooling::StandaloneToolExecutor ex(db, { std::string(filePath) });
         auto result = Corpus::build(ex, config, R_);
-        if(R_.error(result, "build Corpus for '", filePath, "'"))
+
+        if (tc.should_fail && result)
+        {
+            R_.failed("build Corpus for '", filePath, "' should have failed");
+            results_.numberOfErrors++;
+            return llvm::Error::success(); // keep going
+        }
+        else if (R_.error(result, "build Corpus for '", filePath, "'"))
         {
             results_.numberOfErrors++;
             return llvm::Error::success(); // keep going
