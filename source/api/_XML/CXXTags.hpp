@@ -63,7 +63,7 @@ constexpr llvm::StringRef getNameForValue(ConstexprSpecKind CSK)
     case ConstexprSpecKind::Consteval: return "consteval";
     case ConstexprSpecKind::Constinit: return "constinit";
     default:
-        Assert(!"Invalid ConstexprSpecKind");
+        Assert("Invalid ConstexprSpecKind" == nullptr);
     }
     return "";
 }
