@@ -35,18 +35,10 @@ include(GNUInstallDirs)
 #set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO ON CACHE STRING "")
 
 option(MRDOX_BUILD_TESTS "Build tests" ${BUILD_TESTING})
-option(MRDOX_BUILD_SHARED "Link shared" OFF)
 option(MRDOX_BUILD_DOCS "Configure install target" OFF)
 option(MRDOX_INSTALL "Configure install target" ON)
 option(MRDOX_PACKAGE "Build install package" ON)
 option(MRDOX_GENERATE_REFERENCE "Generate reference.xml/reference.adoc" ON)
-
-if (MRDOX_BUILD_SHARED)
-    set(MRDOX_LINK_MODE SHARED)
-    set(MRDOX_LINK_MODE_DEFINITION -DMRDOX_SHARED_LINK)
-else()
-    set(MRDOX_LINK_MODE_DEFINITION -DMRDOX_STATIC_LINK)
-endif()
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     set(MRDOX_GCC ON)
@@ -108,6 +100,7 @@ if (NOT DUKTAPE_SOURCE_ROOT)
 endif()
 add_library(duktape ${DUKTAPE_SOURCE_ROOT}/src/duktape.c ${DUKTAPE_SOURCE_ROOT}/src/duktape.h)
 target_include_directories(duktape PUBLIC ${DUKTAPE_SOURCE_ROOT}/src)
+
 add_library(duktape::duktape ALIAS duktape)
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(duktape PRIVATE -w)
@@ -138,13 +131,11 @@ target_include_directories(mrdox
     "${PROJECT_SOURCE_DIR}/source"
     "${PROJECT_SOURCE_DIR}/include"
 )
-target_compile_definitions(
-    mrdox
-    PUBLIC
-    ${MRDOX_LINK_MODE_DEFINITION}
-    PRIVATE
-    -DMRDOX_TOOL
-)
+
+set_target_properties(mrdox PROPERTIES
+        ENABLE_EXPORTS ON
+        POSITION_INDEPENDENT_CODE ON
+        )
 
 # LLVM
 target_link_libraries(mrdox PUBLIC ${llvm_libs})
@@ -167,7 +158,8 @@ endif()
 target_include_directories(mrdox SYSTEM PUBLIC ${CLANG_INCLUDE_DIRS})
 
 # fmt
-target_link_libraries(mrdox PUBLIC fmt::fmt duktape::duktape)
+target_link_libraries(mrdox PUBLIC fmt::fmt)
+target_link_libraries(mrdox PRIVATE duktape::duktape)
 
 # Windows, Win64
 if (WIN32)
@@ -216,6 +208,20 @@ source_group(TREE ${PROJECT_SOURCE_DIR}/source PREFIX "source" FILES ${SOURCES})
 
 #-------------------------------------------------
 #
+# Plugins
+#
+#-------------------------------------------------
+set(CMAKE_CXX_STANDARD_INCLUDE_DIRECTORIES ${CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES})
+# separate folder so the glob above doesn't pick up on plugin code.
+file(GLOB plugins LIST_DIRECTORIES 1 CONFIGURE_DEPENDS plugins/*)
+
+foreach(plugin ${plugins})
+    add_subdirectory(${plugin})
+endforeach()
+
+
+#-------------------------------------------------
+#
 # Tests
 #
 #-------------------------------------------------
@@ -238,15 +244,19 @@ if (MRDOX_BUILD_TESTS)
             )
 
     if (MRDOX_GENERATE_REFERENCE)
+        file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS source/*.cpp)
+        list(GET TEST_SOURCES 0 TEST_SOURCE)
         # test run
-        set(CMAKE_CXX_STANDARD_INCLUDE_DIRECTORIES ${CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES})
         include(mrdox.cmake)
 
-        mrdox(FORMAT adoc CONFIG docs/mrdox.yml SOURCES ${TEST_SOURCES})
-        mrdox(FORMAT xml  CONFIG docs/mrdox.yml SOURCES ${TEST_SOURCES})
+        mrdox(FORMAT adoc CONFIG docs/mrdox.yml SOURCES ${TEST_SOURCE} OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/test-docs)
+        mrdox(FORMAT xml  CONFIG docs/mrdox.yml SOURCES ${TEST_SOURCE} OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/test-docs)
+        mrdox(FORMAT test CONFIG docs/mrdox.yml SOURCES ${TEST_SOURCE} test_generator
+              OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/test-docs)
 
-        add_custom_target(reference_adoc ALL DEPENDS reference.adoc)
-        add_custom_target(reference_xml  ALL DEPENDS reference.xml)
+        add_custom_target(reference_adoc ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/test-docs/reference.adoc)
+        add_custom_target(reference_xml  ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/test-docs/reference.xml)
+        add_custom_target(reference_test ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/test-docs/reference.test)
     endif()
 
     find_package(LibXml2)

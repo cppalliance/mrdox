@@ -75,7 +75,7 @@ insert(
 
 //------------------------------------------------
 
-Generators const&
+Generators &
 getGenerators() noexcept
 {
     return *toolWorld().generators;

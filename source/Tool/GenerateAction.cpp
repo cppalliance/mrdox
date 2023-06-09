@@ -12,7 +12,9 @@
 #include "ToolArgs.hpp"
 #include "ConfigImpl.hpp"
 #include "CorpusImpl.hpp"
+#include "Plugins.hpp"
 #include "AST/AbsoluteCompilationDatabase.hpp"
+
 #include <mrdox/Generators.hpp>
 #include <mrdox/Support/Report.hpp>
 #include <mrdox/Support/Path.hpp>
@@ -68,6 +70,10 @@ DoGenerateAction()
     toolArgs.outputPath = files::normalizePath(
         files::makeAbsolute(toolArgs.outputPath,
             (*config)->workingDir));
+
+    if (auto err = loadPlugins(toolArgs.addonsDir); err.failed())
+        return err;
+
 
     // Convert relative paths to absolute
     AbsoluteCompilationDatabase compilations(

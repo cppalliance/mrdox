@@ -56,9 +56,9 @@ extern Error DoGenerateAction();
 void
 print_version(llvm::raw_ostream& os)
 {
-    os << project_name
-       << "\n    " << project_description
-       << "\n    version: " << project_version
+    os << projectName
+       << "\n    " << projectDescription
+       << "\n    version: " << projectVersion
        << "\n    built with LLVM " << LLVM_VERSION_STRING;
 }
 
@@ -142,7 +142,6 @@ int mrdox_main(int argc, char const** argv)
             toolArgs.addonsDir.getValue() = addonsDir;
         }
     }
-
     // Generate
     if(toolArgs.toolAction == Action::generate)
     {

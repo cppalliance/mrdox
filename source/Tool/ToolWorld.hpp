@@ -14,6 +14,8 @@
 #include <memory>
 #include <vector>
 
+#include <llvm/Support/DynamicLibrary.h>
+
 namespace clang {
 namespace mrdox {
 
@@ -33,6 +35,7 @@ class ToolWorld
     // Members declared first are destroyed last.
     // remember: last gets unloaded first.
   public:
+    std::vector<llvm::sys::DynamicLibrary> plugins;
     std::unique_ptr<class Generators> generators;
     friend int mrdox_main(int argc, char const** argv);
 };
