@@ -122,6 +122,7 @@ file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS source/*.cpp source/*.hpp source/*.i
 file(GLOB_RECURSE INCLUDES CONFIGURE_DEPENDS include/*.hpp)
 add_executable(mrdox ${SOURCES} ${INCLUDES})
 
+target_compile_definitions(mrdox PRIVATE MRDOX_TOOL=1)
 target_compile_features(mrdox PUBLIC cxx_std_20)
 target_include_directories(mrdox
     PUBLIC

@@ -50,10 +50,12 @@ namespace mrdox {
 
 // (unknown)
 #elif defined(__GNUC__)
+# define MRDOX_SYMBOL_EXPORT __attribute__((visibility("default")))
+# define MRDOX_SYMBOL_IMPORT
 # if defined(MRDOX_TOOL) // building library
-#   define MRDOX_DECL
+#   define MRDOX_DECL MRDOX_SYMBOL_EXPORT
 # else
-#   define MRDOX_DECL __attribute__((visibility("default")))
+#   define MRDOX_DECL MRDOX_SYMBOL_IMPORT
 #endif
 # define MRDOX_VISIBLE __attribute__((visibility("default")))
 #else
