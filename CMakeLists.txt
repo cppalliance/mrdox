@@ -229,14 +229,7 @@ endforeach()
 
 if (MRDOX_BUILD_TESTS)
     # if we run tests, we need the addons in the right place.
-    add_custom_command(
-            TARGET mrdox
-            POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy
-                    ${CMAKE_SOURCE_DIR}/addons
-                    ${CMAKE_BINARY_DIR}/addons
-            BYPRODUCTS ${CMAKE_BINARY_DIR}/addons
-    )
+    file (COPY ${CMAKE_CURRENT_SOURCE_DIR}/addons DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
     file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS source/*.cpp source/*.hpp)
     enable_testing()
@@ -268,12 +261,12 @@ if (MRDOX_BUILD_TESTS)
             message(FATAL_ERROR "Java is needed to run xml-lint")
         endif()
 
-        add_custom_target(
-            mrdox.rng ALL
-            DEPENDS mrdox.rnc
+        add_custom_command(
             COMMAND ${Java_JAVA_EXECUTABLE} -jar ${CMAKE_CURRENT_SOURCE_DIR}/tools/trang.jar
                 ${CMAKE_CURRENT_SOURCE_DIR}/mrdox.rnc ${CMAKE_CURRENT_BINARY_DIR}/mrdox.rng
-            SOURCES mrdox.rnc)
+            OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/mrdox.rng
+            MAIN_DEPENDENCY mrdox.rnc)
+        add_custom_target(mrdox.rnc ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/mrdox.rng)
 
         file(GLOB_RECURSE XML_SOURCES CONFIGURE_DEPENDS test-files/*.xml)
         add_test(NAME xml-lint
