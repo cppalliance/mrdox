@@ -34,7 +34,9 @@ protected:
     struct MRDOX_DECL
         AnyAgent
     {
+        MRDOX_DECL
         virtual ~AnyAgent() = 0;
+        MRDOX_DECL
         virtual void* get() noexcept = 0;
     };
 
