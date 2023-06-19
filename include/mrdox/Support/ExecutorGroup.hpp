@@ -31,7 +31,7 @@ class MRDOX_DECL
 protected:
     struct Impl;
 
-    struct MRDOX_DECL
+    struct MRDOX_VISIBLE
         AnyAgent
     {
         MRDOX_DECL

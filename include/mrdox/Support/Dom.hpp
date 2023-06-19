@@ -50,8 +50,7 @@ enum class Kind
 
 /** Reference-counting base class for dynamic types.
 */
-class MRDOX_DECL
-    Any
+class Any
 {
     std::atomic<std::size_t> mutable refs_ = 1;
 
