@@ -8,12 +8,13 @@
 // Official repository: https://github.com/cppalliance/mrdox
 //
 
-#ifndef MRDOX_TOOL_SUPPORT_GENERATORSIMPL_HPP
-#define MRDOX_TOOL_SUPPORT_GENERATORSIMPL_HPP
+#ifndef MRDOX_TOOL_TOOL_GENERATORSIMPL_HPP
+#define MRDOX_TOOL_TOOL_GENERATORSIMPL_HPP
 
 #include <mrdox/Support/Error.hpp>
 #include <mrdox/Platform.hpp>
 #include <mrdox/Generators.hpp>
+
 #include <llvm/ADT/SmallVector.h>
 #include <memory>
 #include <vector>
@@ -51,18 +52,12 @@ public:
     find(
         std::string_view name) const noexcept override;
 
-    /** Insert a generator
-    */
     Error
-    insert(std::unique_ptr<Generator> G);
+    insert(std::unique_ptr<Generator> G) override;
 };
 
-/** Return a reference to the global GeneratorsImpl instance.
-*/
-GeneratorsImpl&
-getGeneratorsImpl() noexcept;
 
 } // mrdox
 } // clang
 
-#endif
+#endif // MRDOX_TOOL_TOOL_GENERATORSIMPL_HPP

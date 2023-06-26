@@ -33,6 +33,7 @@
 //------------------------------------------------
 
 #include "ToolArgs.hpp"
+#include "ToolWorld.hpp"
 #include "Support/Debug.hpp"
 #include <mrdox/Support/Path.hpp>
 #include <mrdox/Support/Report.hpp>
@@ -55,14 +56,16 @@ extern Error DoGenerateAction();
 void
 print_version(llvm::raw_ostream& os)
 {
-    os << project_name
-       << "\n    " << project_description
-       << "\n    version: " << project_version
+    os << projectName
+       << "\n    " << projectDescription
+       << "\n    version: " << projectVersion
        << "\n    built with LLVM " << LLVM_VERSION_STRING;
 }
 
 int mrdox_main(int argc, char const** argv)
 {
+    clang::mrdox::ToolWorld theToolWorld;
+
     namespace fs = llvm::sys::fs;
     using Process = llvm::sys::Process;
 
@@ -139,7 +142,6 @@ int mrdox_main(int argc, char const** argv)
             toolArgs.addonsDir.getValue() = addonsDir;
         }
     }
-
     // Generate
     if(toolArgs.toolAction == Action::generate)
     {

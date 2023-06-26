@@ -141,8 +141,8 @@ reportInfo(
 
 /** Report an unhandled exception
 */
-MRDOX_DECL
 [[noreturn]]
+MRDOX_DECL
 void
 reportUnhandledException(
     std::exception const& ex);

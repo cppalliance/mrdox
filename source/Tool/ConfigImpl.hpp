@@ -129,6 +129,7 @@ public:
         std::string_view extraYaml);
 
     friend
+    MRDOX_DECL
     Expected<std::shared_ptr<ConfigImpl const>>
     loadConfigFile(
         std::string_view configFilePath,

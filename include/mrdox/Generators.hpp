@@ -68,12 +68,20 @@ public:
     Generator const*
     find(
         std::string_view name) const noexcept = 0;
+
+    /** Insert a generator
+    */
+    MRDOX_DECL
+    virtual
+    Error
+    insert(std::unique_ptr<Generator> G)  = 0;
+
 };
 
 /** Return a reference to the global Generators instance.
 */
 MRDOX_DECL
-Generators const&
+Generators &
 getGenerators() noexcept;
 
 } // mrdox

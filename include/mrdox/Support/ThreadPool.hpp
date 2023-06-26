@@ -154,8 +154,8 @@ public:
         @return Zero or more errors which were
         thrown from submitted work.
     */
-    MRDOX_DECL
     [[nodiscard]]
+    MRDOX_DECL
     std::vector<Error>
     wait();
 
