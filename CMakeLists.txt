@@ -264,9 +264,9 @@ if (MRDOX_BUILD_TESTS)
         add_custom_command(
             COMMAND ${Java_JAVA_EXECUTABLE} -jar ${CMAKE_CURRENT_SOURCE_DIR}/tools/trang.jar
                 ${CMAKE_CURRENT_SOURCE_DIR}/mrdox.rnc ${CMAKE_CURRENT_BINARY_DIR}/mrdox.rng
-            OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/mrdox.rng
-            MAIN_DEPENDENCY mrdox.rnc)
-        add_custom_target(mrdox.rnc ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/mrdox.rng)
+            OUTPUT mrdox.rng
+            DEPENDS mrdox.rnc)
+        add_custom_target(mrdox_rng ALL DEPENDS mrdox.rng)
 
         file(GLOB_RECURSE XML_SOURCES CONFIGURE_DEPENDS test-files/*.xml)
         add_test(NAME xml-lint
