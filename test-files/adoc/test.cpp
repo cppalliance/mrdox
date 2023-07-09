@@ -1,7 +1,28 @@
-/** brief
+void f0();
 
-    desc
+///
+void f1();
 
-    @warning caution
+/**
 */
-void f();
+void f2();
+
+/** 
+*/
+void f3();
+
+/** brief
+*/
+void f4();
+
+/** @brief
+*/
+void f5();
+
+/** @brief  
+*/
+void f6();
+
+/** @brief brief
+*/
+void f7();

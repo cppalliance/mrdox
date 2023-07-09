@@ -61,10 +61,13 @@ public:
                     warnCount, warnCount > 1
                         ? "warnings" : "warning");
             }
+            os << " total.";
         }
         else
         {
-            os << "No errors or warnings.\n";
+            // VFALCO commented this out because it
+            // is noisy for the tests.. needs fixing.
+            //os << "No errors or warnings.\n";
         }
         report::print_impl(level, s);
     }

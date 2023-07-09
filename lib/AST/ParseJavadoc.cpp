@@ -29,8 +29,7 @@
 #include <clang/Basic/SourceManager.h>
 #include <llvm/Support/JSON.h>
 
-/*
-    Comment Types
+/*  AST Types
 
     Comment
         abstract base for all comments
@@ -83,10 +82,10 @@
 
         VerbatimBlockLineComment : Comment
             A line of text contained in a verbatim block.
-*/
-/*
+
     BlockCommandComment
         Always has one child of type ParagraphComment child?
+
 */
 
 namespace clang {
@@ -106,8 +105,9 @@ class JavadocVisitor
     SourceManager const& sm_;
     FullComment const* FC_;
     Javadoc jd_;
+    Diagnostics& diags_;
     doc::List<doc::Param> params_;
-    doc::Paragraph* paragraph_ = nullptr;
+    doc::Block* block_ = nullptr;
     std::size_t htmlTagNesting_ = 0;
     Comment::child_iterator it_;
     Comment::child_iterator end_;
@@ -117,7 +117,8 @@ class JavadocVisitor
 
 public:
     JavadocVisitor(
-        RawComment const*, Decl const*, Config const&);
+        RawComment const*, Decl const*,
+        Config const&, Diagnostics&);
     Javadoc build();
 
     void visitComment(Comment const* C);
@@ -136,6 +137,9 @@ public:
     void visitVerbatimBlockComment(VerbatimBlockComment const* C);
     void visitVerbatimLineComment(VerbatimLineComment const* C);
     void visitVerbatimBlockLineComment(VerbatimBlockLineComment const* C);
+
+    // helpers
+    bool goodArgCount(std::size_t n, InlineCommandComment const& C);
 };
 
 //------------------------------------------------
@@ -201,11 +205,13 @@ JavadocVisitor::
 JavadocVisitor(
     RawComment const* RC,
     Decl const* D,
-    Config const& config)
+    Config const& config,
+    Diagnostics& diags)
     : config_(config)
     , ctx_(D->getASTContext())
     , sm_(ctx_.getSourceManager())
     , FC_(RC->parse(D->getASTContext(), nullptr, D))
+    , diags_(diags)
 {
 }
 
@@ -237,24 +243,18 @@ visitTextComment(
     TextComment const* C)
 {
     llvm::StringRef s = C->getText();
-    // If this is the very first node, the
-    // paragraph has no doxygen command,
-    // so we will trim the leading space.
-    // Otherwise just trim trailing space
-#if 0
-    if(paragraph_->children.empty())
-        s = s.ltrim().rtrim();
-    else
-        s = s.rtrim(); //.ltrim()
-#else
-    s = s.rtrim();
-#endif
 
-    // VFALCO Figure out why we get empty TextComment
-#if 0
+    // If this is the first text comment in the
+    // paragraph then remove all the leading space.
+    // Otherwise, just remove the trailing space.
+    if(block_->children.empty())
+        s = s.ltrim();
+    else
+        s = s.rtrim();
+
+    // Only insert non-empty text nodes
     if(! s.empty())
-#endif
-        paragraph_->emplace_back(doc::Text(ensureUTF8(s.str())));
+        block_->emplace_back(doc::Text(ensureUTF8(s.str())));
 }
 
 void
@@ -308,7 +308,7 @@ visitHTMLStartTagComment(
                 break;
             }
         }
-        paragraph_->emplace_back(doc::Link(
+        block_->emplace_back(doc::Link(
             ensureUTF8(std::move(text)),
             ensureUTF8(std::move(href))));
 
@@ -331,6 +331,46 @@ JavadocVisitor::
 visitInlineCommandComment(
     InlineCommandComment const* C)
 {
+    auto const* cmd = ctx_
+        .getCommentCommandTraits()
+        .getCommandInfo(C->getCommandID());
+
+    // VFALCO I'd like to know when this happens
+    MRDOX_ASSERT(cmd != nullptr);
+
+    switch(cmd->getID())
+    {
+    // Emphasis
+    case CommandTraits::KCI_a:
+    case CommandTraits::KCI_e:
+    case CommandTraits::KCI_em:
+    {
+        if(! goodArgCount(1, *C))
+            return;
+        auto style = doc::Style::italic;
+        auto s = C->getArgText(0);
+        block_->emplace_back(doc::Styled(s.str(), style));
+        return;
+    }
+
+    // copy
+    case CommandTraits::KCI_copybrief:
+    case CommandTraits::KCI_copydetails:
+    case CommandTraits::KCI_copydoc:
+    {
+        if(C->getNumArgs() != 1)
+        {
+            // report an error
+            diags_.error("getNumArgs() != 1");
+            return;
+        }
+        return;
+    }
+
+    default:
+        break;
+    }
+
     doc::Style style(doc::Style::none);
     switch (C->getRenderKind())
     {
@@ -364,9 +404,9 @@ visitInlineCommandComment(
         s.append(C->getArgText(i));
 
     if(style != doc::Style::none)
-        paragraph_->emplace_back(doc::Styled(std::move(s), style));
+        block_->emplace_back(doc::Styled(std::move(s), style));
     else
-        paragraph_->emplace_back(doc::Text(std::move(s)));
+        block_->emplace_back(doc::Text(std::move(s)));
 }
 
 //------------------------------------------------
@@ -380,10 +420,10 @@ JavadocVisitor::
 visitParagraphComment(
     ParagraphComment const* C)
 {
-    if(paragraph_)
+    if(block_)
         return visitChildren(C);
     doc::Paragraph paragraph;
-    Scope scope(paragraph, paragraph_);
+    Scope scope(paragraph, block_);
     visitChildren(C);
     // VFALCO Figure out why we get empty ParagraphComment
     if(! paragraph.empty())
@@ -404,26 +444,247 @@ visitBlockCommandComment(
         // text that follows for now.
         return;
     }
-    if(cmd->IsBriefCommand)
+
+    switch(cmd->getID())
+    {
+    case CommandTraits::KCI_brief:
+    case CommandTraits::KCI_short:
     {
         doc::Brief brief;
-        Scope scope(brief, paragraph_);
+        Scope scope(brief, block_);
         visitChildren(C->getParagraph());
+        // Here, we want empty briefs, because
+        // the @brief command was explicitly given.
         jd_.emplace_back(std::move(brief));
         return;
     }
-    if(cmd->IsReturnsCommand)
+
+    case CommandTraits::KCI_return:
+    case CommandTraits::KCI_returns:
     {
         doc::Returns returns;
-        Scope scope(returns, paragraph_);
+        Scope scope(returns, block_);
         visitChildren(C->getParagraph());
         jd_.emplace_back(std::move(returns));
         return;
     }
-    if(cmd->getID() == CommandTraits::KCI_note)
+
+    case CommandTraits::KCI_addindex:
+    case CommandTraits::KCI_addtogroup:
+    case CommandTraits::KCI_anchor:
+    case CommandTraits::KCI_arg:
+    case CommandTraits::KCI_attention:
+    case CommandTraits::KCI_author:
+    case CommandTraits::KCI_authors:
+    case CommandTraits::KCI_b:
+    case CommandTraits::KCI_bug:
+    case CommandTraits::KCI_c:
+    case CommandTraits::KCI_callergraph:
+    case CommandTraits::KCI_callgraph:
+    case CommandTraits::KCI_category:
+    case CommandTraits::KCI_cite:
+    case CommandTraits::KCI_class:
+    case CommandTraits::KCI_code:
+    case CommandTraits::KCI_concept:
+    case CommandTraits::KCI_cond:
+    case CommandTraits::KCI_copyright:
+    case CommandTraits::KCI_date:
+    case CommandTraits::KCI_def:
+    case CommandTraits::KCI_defgroup:
+    case CommandTraits::KCI_deprecated:
+    case CommandTraits::KCI_details:
+    case CommandTraits::KCI_diafile:
+    case CommandTraits::KCI_dir:
+    case CommandTraits::KCI_docbookinclude:
+    case CommandTraits::KCI_docbookonly:
+    case CommandTraits::KCI_dontinclude:
+    case CommandTraits::KCI_dot:
+    case CommandTraits::KCI_dotfile:
+    //case CommandTraits::KCI_doxyconfig:
+    case CommandTraits::KCI_else:
+    case CommandTraits::KCI_elseif:
+    case CommandTraits::KCI_emoji:
+    case CommandTraits::KCI_endcode:
+    case CommandTraits::KCI_endcond:
+    case CommandTraits::KCI_enddocbookonly:
+    case CommandTraits::KCI_enddot:
+    case CommandTraits::KCI_endhtmlonly:
+    case CommandTraits::KCI_endif:
+    case CommandTraits::KCI_endinternal:
+    case CommandTraits::KCI_endlatexonly:
+    //case CommandTraits::KCI_endlink:
+    case CommandTraits::KCI_endmanonly:
+    case CommandTraits::KCI_endmsc:
+    case CommandTraits::KCI_endparblock:
+    case CommandTraits::KCI_endrtfonly:
+    case CommandTraits::KCI_endsecreflist:
+    case CommandTraits::KCI_endverbatim:
+    case CommandTraits::KCI_enduml:
+    case CommandTraits::KCI_endxmlonly:
+    case CommandTraits::KCI_enum:
+    case CommandTraits::KCI_example:
+    case CommandTraits::KCI_exception:
+    case CommandTraits::KCI_extends:
+    case CommandTraits::KCI_flparen:  // @f(
+    case CommandTraits::KCI_frparen:  // @f)
+    case CommandTraits::KCI_fdollar:  // @f$
+    case CommandTraits::KCI_flsquare: // @f[
+    case CommandTraits::KCI_frsquare: // @f]
+    case CommandTraits::KCI_flbrace:  // @f{
+    case CommandTraits::KCI_frbrace:  // @f}
+    case CommandTraits::KCI_file:
+    //case CommandTraits::KCI_fileinfo:
+    case CommandTraits::KCI_fn:
+    case CommandTraits::KCI_headerfile:
+    case CommandTraits::KCI_hidecallergraph:
+    case CommandTraits::KCI_hidecallgraph:
+    case CommandTraits::KCI_hiderefby:
+    case CommandTraits::KCI_hiderefs:
+    case CommandTraits::KCI_hideinitializer:
+    case CommandTraits::KCI_htmlinclude:
+    case CommandTraits::KCI_htmlonly:
+    case CommandTraits::KCI_idlexcept:
+    case CommandTraits::KCI_if:
+    case CommandTraits::KCI_ifnot:
+    case CommandTraits::KCI_image:
+    case CommandTraits::KCI_implements:
+    case CommandTraits::KCI_include:
+    //case CommandTraits::KCI_includedoc:
+    //case CommandTraits::KCI_includelineno:
+    case CommandTraits::KCI_ingroup:
+    case CommandTraits::KCI_internal:
+    case CommandTraits::KCI_invariant:
+    case CommandTraits::KCI_interface:
+    case CommandTraits::KCI_latexinclude:
+    case CommandTraits::KCI_latexonly:
+    case CommandTraits::KCI_li:
+    case CommandTraits::KCI_line:
+    //case CommandTraits::KCI_lineinfo:
+    case CommandTraits::KCI_link:
+    case CommandTraits::KCI_mainpage:
+    case CommandTraits::KCI_maninclude:
+    case CommandTraits::KCI_manonly:
+    case CommandTraits::KCI_memberof:
+    case CommandTraits::KCI_msc:
+    case CommandTraits::KCI_mscfile:
+    case CommandTraits::KCI_n:
+    case CommandTraits::KCI_name:
+    case CommandTraits::KCI_namespace:
+    case CommandTraits::KCI_noop:
+    case CommandTraits::KCI_nosubgrouping:
+    case CommandTraits::KCI_note:
+    case CommandTraits::KCI_overload:
+    case CommandTraits::KCI_p:
+    //case CommandTraits::KCI_package:
+    case CommandTraits::KCI_page:
+    case CommandTraits::KCI_par:
+    case CommandTraits::KCI_paragraph:
+    case CommandTraits::KCI_param:
+    case CommandTraits::KCI_parblock:
+    case CommandTraits::KCI_post:
+    case CommandTraits::KCI_pre:
+    case CommandTraits::KCI_private:
+    case CommandTraits::KCI_privatesection:
+    case CommandTraits::KCI_property:
+    case CommandTraits::KCI_protected:
+    case CommandTraits::KCI_protectedsection:
+    case CommandTraits::KCI_protocol:
+    case CommandTraits::KCI_public:
+    case CommandTraits::KCI_publicsection:
+    case CommandTraits::KCI_pure:
+    //case CommandTraits::KCI_qualifier:
+    //case CommandTraits::KCI_raisewarning:
+    case CommandTraits::KCI_ref:
+    case CommandTraits::KCI_refitem:
+    case CommandTraits::KCI_related:
+    case CommandTraits::KCI_relates:
+    case CommandTraits::KCI_relatedalso:
+    case CommandTraits::KCI_relatesalso:
+    case CommandTraits::KCI_remark:
+    case CommandTraits::KCI_remarks:
+    case CommandTraits::KCI_result:
+
+    case CommandTraits::KCI_retval:
+    case CommandTraits::KCI_rtfinclude:
+    case CommandTraits::KCI_rtfonly:
+    case CommandTraits::KCI_sa:
+    case CommandTraits::KCI_secreflist:
+    case CommandTraits::KCI_section:
+    case CommandTraits::KCI_see:
+    //case CommandTraits::KCI_showdate:
+    case CommandTraits::KCI_showinitializer:
+    case CommandTraits::KCI_showrefby:
+    case CommandTraits::KCI_showrefs:
+    case CommandTraits::KCI_since:
+    case CommandTraits::KCI_skip:
+    case CommandTraits::KCI_skipline:
+    case CommandTraits::KCI_snippet:
+    //case CommandTraits::KCI_snippetdoc:
+    //case CommandTraits::KCI_snippetlineno:
+    case CommandTraits::KCI_static:
+    case CommandTraits::KCI_startuml:
+    case CommandTraits::KCI_struct:
+    case CommandTraits::KCI_subpage:
+    case CommandTraits::KCI_subsection:
+    case CommandTraits::KCI_subsubsection:
+    case CommandTraits::KCI_tableofcontents:
+    case CommandTraits::KCI_test:
+    case CommandTraits::KCI_throw:
+    case CommandTraits::KCI_throws:
+    case CommandTraits::KCI_todo:
+    case CommandTraits::KCI_tparam:
+    case CommandTraits::KCI_typedef:
+    case CommandTraits::KCI_union:
+    case CommandTraits::KCI_until:
+    case CommandTraits::KCI_var:
+    case CommandTraits::KCI_verbatim:
+    case CommandTraits::KCI_verbinclude:
+    case CommandTraits::KCI_version:
+    //case CommandTraits::KCI_vhdlflow:
+    case CommandTraits::KCI_warning:
+    case CommandTraits::KCI_weakgroup:
+    case CommandTraits::KCI_xmlinclude:
+    case CommandTraits::KCI_xmlonly:
+    case CommandTraits::KCI_xrefitem:
+    /*
+        @$
+        @@
+        @\
+        @&
+        @~
+        @<
+        @=
+        @>
+        @#
+        @%
+        @"
+        @.
+        @::
+        @|
+        @--
+        @---
+    */
+        break;
+
+    // inline commands handled elsewhere
+    case CommandTraits::KCI_a:
+    case CommandTraits::KCI_e:
+    case CommandTraits::KCI_em:
+    case CommandTraits::KCI_copybrief:
+    case CommandTraits::KCI_copydetails:
+    case CommandTraits::KCI_copydoc:
+        MRDOX_UNREACHABLE();
+
+    default:
+        MRDOX_UNREACHABLE();
+    }
+    if(cmd->IsReturnsCommand)
+    {
+    }
+   if(cmd->getID() == CommandTraits::KCI_note)
     {
         doc::Admonition paragraph(doc::Admonish::note);
-        Scope scope(paragraph, paragraph_);
+        Scope scope(paragraph, block_);
         visitChildren(C->getParagraph());
         jd_.emplace_back(std::move(paragraph));
         return;
@@ -431,7 +692,7 @@ visitBlockCommandComment(
     if(cmd->getID() == CommandTraits::KCI_warning)
     {
         doc::Admonition paragraph(doc::Admonish::warning);
-        Scope scope(paragraph, paragraph_);
+        Scope scope(paragraph, block_);
         visitChildren(C->getParagraph());
         jd_.emplace_back(std::move(paragraph));
         return;
@@ -442,7 +703,7 @@ visitBlockCommandComment(
         // for Boost libraries using @par as a
         // section heading.
         doc::Paragraph paragraph;
-        Scope scope(paragraph, paragraph_);
+        Scope scope(paragraph, block_);
         visitChildren(C->getParagraph());
         if(! paragraph.children.empty())
         {
@@ -470,7 +731,7 @@ visitBlockCommandComment(
     if(cmd->getID() == CommandTraits::KCI_li)
     {
         doc::ListItem paragraph;
-        Scope scope(paragraph, paragraph_);
+        Scope scope(paragraph, block_);
         visitChildren(C->getParagraph());
         jd_.emplace_back(std::move(paragraph));
         return;
@@ -484,9 +745,15 @@ visitParamCommandComment(
 {
     doc::Param param;
     if(C->hasParamName())
+    {
         param.name = ensureUTF8(C->getParamNameAsWritten().str());
+    }
     else
+    {
+        // VFALCO report SourceLocation here
+        diags_.error("Missing parameter name in @param");
         param.name = "@anon";
+    }
     if(C->isDirectionExplicit())
     {
         switch(C->getDirection())
@@ -502,9 +769,9 @@ visitParamCommandComment(
             break;
         }
     }
-    Scope scope(param, paragraph_);
-    //if(C->hasNonWhitespaceParagraph())
+    Scope scope(param, block_);
     visitChildren(C->getParagraph());
+    // We want the node even if it is empty
     jd_.emplace_back(std::move(param));
 }
 
@@ -515,12 +782,18 @@ visitTParamCommandComment(
 {
     doc::TParam tparam;
     if(C->hasParamName())
+    {
         tparam.name = ensureUTF8(C->getParamNameAsWritten().str());
+    }
     else
+    {
+        // VFALCO report SourceLocation here
+        diags_.error("Missing parameter name in @tparam");
         tparam.name = "@anon";
-    Scope scope(tparam, paragraph_);
-    //if(C->hasNonWhitespaceParagraph())
+    }
+    Scope scope(tparam, block_);
     visitChildren(C->getParagraph());
+    // We want the node even if it is empty
     jd_.emplace_back(std::move(tparam));
 }
 
@@ -530,7 +803,7 @@ visitVerbatimBlockComment(
     VerbatimBlockComment const* C)
 {
     doc::Code code;
-    Scope scope(code, paragraph_);
+    Scope scope(code, block_);
     //if(C->hasNonWhitespaceParagraph())
     visitChildren(C);
     jd_.emplace_back(std::move(code));
@@ -550,147 +823,36 @@ JavadocVisitor::
 visitVerbatimBlockLineComment(
     VerbatimBlockLineComment const* C)
 {
-    paragraph_->emplace_back(doc::Text(C->getText().str()));
+    block_->emplace_back(doc::Text(C->getText().str()));
 }
 
 //------------------------------------------------
 
-template<class Pred>
-void
-dumpCommandTraits(
-    char const* title,
-    llvm::raw_ostream& os,
-    Pred&& pred)
+bool
+JavadocVisitor::
+goodArgCount(std::size_t n,
+    InlineCommandComment const& C)
 {
-    using namespace comments;
-
-    std::vector<CommandInfo const*> list;
-    list.reserve(CommandTraits::KCI_Last);
-    for(std::size_t id = 0; id < CommandTraits::KCI_Last; ++id)
+    if(C.getNumArgs() != n)
     {
-        auto const& cmd = *CommandTraits::getBuiltinCommandInfo(id);
-        if(pred(cmd))
-            list.push_back(&cmd);
-    }
-    std::sort(list.begin(), list.end(),
-        []( CommandInfo const* cmd0,
-            CommandInfo const* cmd1)
-        {
-            llvm::StringRef s0(cmd0->Name);
-            llvm::StringRef s1(cmd1->Name);
-            return s0.compare(s1) < 0;
-        });
-    for(auto const& cmd : list)
-    {
-        if(title)
-        {
-            os << '\n' << title << '\n';
-            title = nullptr;
-        }
-        os << '\\' << cmd->Name;
-        if(cmd->EndCommandName && cmd->EndCommandName[0])
-            os << ", \\" << cmd->EndCommandName << "\\";
-        if(cmd->NumArgs > 0)
-            os << " [" << std::to_string(cmd->NumArgs) << "]";
+        auto loc = sm_.getPresumedLoc(C.getBeginLoc());
 
-    #if 0
-        if(cmd->IsInlineCommand)
-            os << " inline";
-        if(cmd->IsBlockCommand)
-            os << " block";
-        if(cmd->IsVerbatimBlockCommand)
-            os << " verbatim";
-        if(cmd->IsVerbatimBlockEndCommand)
-            os << " verbatim-end";
-        if(cmd->IsVerbatimLineCommand)
-            os << " verbatim-line";
-    #endif
+        diags_.error(fmt::format(
+            "Expected {} but got {} args\n"
+            "File: {}, line {}, col {}\n",
+            n, C.getNumArgs(),
+            loc.getFilename(),
+            loc.getLine(),
+            loc.getColumn()));
 
-        if(cmd->IsBriefCommand)
-            os << " brief";
-        if(cmd->IsReturnsCommand)
-            os << " returns";
-        if(cmd->IsParamCommand)
-            os << " param";
-        if(cmd->IsTParamCommand)
-            os << " tparam";
-        if(cmd->IsThrowsCommand)
-            os << " throws";
-        if(cmd->IsDeprecatedCommand)
-            os << " deprecated";
-        if(cmd->IsHeaderfileCommand)
-            os << " header";
-        if(cmd->IsBlockCommand)
-        {
-            if(cmd->IsEmptyParagraphAllowed)
-                os << " empty-ok";
-            else
-                os << " no-empty";
-        }
-        if(cmd->IsDeclarationCommand)
-            os << " decl";
-        if(cmd->IsFunctionDeclarationCommand)
-            os << " fn-decl";
-        if(cmd->IsRecordLikeDetailCommand)
-            os << " record-detail";
-        if(cmd->IsRecordLikeDeclarationCommand)
-            os << " record-decl";
-        if(cmd->IsUnknownCommand)
-            os << " unknown";
-        os << '\n';
+        return false;
     }
+    return true;
 }
+
+//------------------------------------------------
 
 } // (anon)
-
-//------------------------------------------------
-
-void
-dumpCommentTypes()
-{
-    auto& os = llvm::outs();
-
-    #define COMMENT(Type, Base) os << #Type << " : " << #Base << '\n';
-    #include <clang/AST/CommentNodes.inc>
-    #undef COMMENT
-
-    os << "\n\n";
-}
-
-void
-dumpCommentCommands()
-{
-    auto& os = llvm::outs();
-
-    dumpCommandTraits(
-        "Inline Commands\n"
-        "---------------", os,
-        [](CommandInfo const& cmd) -> bool
-        {
-            return cmd.IsInlineCommand;
-        });
-
-    dumpCommandTraits(
-        "Block Commands\n"
-        "--------------", os,
-        [](CommandInfo const& cmd) -> bool
-        {
-            return cmd.IsBlockCommand;
-        });
-
-    dumpCommandTraits(
-        "Verbatim Commands\n"
-        "-----------------", os,
-        [](CommandInfo const& cmd) -> bool
-        {
-            return
-                cmd.IsVerbatimBlockCommand ||
-                cmd.IsVerbatimBlockEndCommand ||
-                cmd.IsVerbatimLineCommand;
-        });
-}
-
-//------------------------------------------------
 
 void
 initCustomCommentCommands(ASTContext& context)
@@ -714,23 +876,26 @@ parseJavadoc(
     std::unique_ptr<Javadoc>& jd,
     RawComment* RC,
     Decl const* D,
-    Config const& config)
+    Config const& config,
+    Diagnostics& diags)
 {
-    if(RC)
+    if(! RC)
+        return;
+
+    RC->setAttached();
+
+    auto result = JavadocVisitor(RC, D, config, diags).build();
+
+    if(jd == nullptr)
     {
-        RC->setAttached();
-
-        auto result = JavadocVisitor(RC, D, config).build();
-
-        if(jd == nullptr)
-        {
+        // Do not create javadocs which have no nodes
+        if(! result.getBlocks().empty())
             jd = std::make_unique<Javadoc>(std::move(result));
-        }
-        else if(*jd != result)
-        {
-            // merge
-            jd->append(std::move(result));
-        }
+    }
+    else if(*jd != result)
+    {
+        // merge
+        jd->append(std::move(result));
     }
 }
 
