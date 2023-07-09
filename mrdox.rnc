@@ -277,7 +277,7 @@ grammar
     Brief = element brief { TextNode * }
     Code = element code { TextNode* }
     Heading = element head { text }
-    ListItem = Paragraph
+    ListItem = element listitem { TextNode* }
     Paragraph = element para {
         attribute class { text } ?,
         TextNode * }

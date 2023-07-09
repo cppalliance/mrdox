@@ -58,7 +58,7 @@ void DoTestAction()
     if(auto n = results.expectedXmlMatching.load())
         os << ", " << report::numberOf(n, "file", "files") << " matched";
     if(auto n = results.expectedXmlWritten.load())
-        os << report::numberOf(n, "file", "files") << " written";
+        os << ", " << report::numberOf(n, "file", "files") << " written";
     os << ".\n";
 }
 
