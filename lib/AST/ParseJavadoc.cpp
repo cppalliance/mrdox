@@ -340,6 +340,7 @@ visitInlineCommandComment(
 
     switch(cmd->getID())
     {
+    // Emphasis
     case CommandTraits::KCI_a:
     case CommandTraits::KCI_e:
     case CommandTraits::KCI_em:
@@ -352,6 +353,7 @@ visitInlineCommandComment(
         return;
     }
 
+    // copy
     case CommandTraits::KCI_copybrief:
     case CommandTraits::KCI_copydetails:
     case CommandTraits::KCI_copydoc:
@@ -359,6 +361,8 @@ visitInlineCommandComment(
         if(C->getNumArgs() != 1)
         {
             // report an error
+            diags_.error("getNumArgs() != 1");
+            return;
         }
         return;
     }
