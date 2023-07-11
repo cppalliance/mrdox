@@ -39,7 +39,7 @@ struct Located
 
     template<class Arg>
     requires std::is_constructible_v<T, Arg>
-    Located(
+    consteval Located(
         Arg&& arg,
         source_location const& loc =
             source_location::current())
@@ -421,7 +421,7 @@ template<class... Args>
 struct FormatString
 {
     template<class T>
-    FormatString(
+    consteval FormatString(
         T const& fs_,
         source_location loc_ =
             source_location::current())
@@ -798,7 +798,7 @@ template<class... Args>
 void
 print(
     Level level,
-    Located<std::string_view> format,
+    Located<fmt::format_string<std::type_identity_t<Args>...>> format,
     Args&&... args)
 {
     return print_impl(
@@ -815,7 +815,7 @@ print(
 template<class... Args>
 void
 debug(
-    Located<std::string_view> format,
+    Located<fmt::format_string<std::type_identity_t<Args>...>> format,
     Args&&... args)
 {
     return print_impl(
@@ -832,7 +832,7 @@ debug(
 template<class... Args>
 void
 info(
-    Located<std::string_view> format,
+    Located<fmt::format_string<std::type_identity_t<Args>...>> format,
     Args&&... args)
 {
     return print_impl(
@@ -849,7 +849,7 @@ info(
 template<class... Args>
 void
 warn(
-    Located<std::string_view> format,
+    Located<fmt::format_string<std::type_identity_t<Args>...>> format,
     Args&&... args)
 {
     return print_impl(
@@ -866,7 +866,7 @@ warn(
 template<class... Args>
 void
 error(
-    Located<std::string_view> format,
+    Located<fmt::format_string<std::type_identity_t<Args>...>> format,
     Args&&... args)
 {
     return print_impl(
@@ -883,7 +883,7 @@ error(
 template<class... Args>
 void
 fatal(
-    Located<std::string_view> format,
+    Located<fmt::format_string<std::type_identity_t<Args>...>> format,
     Args&&... args)
 {
     return print_impl(
