@@ -36,18 +36,10 @@ Builder(
     namespace fs = llvm::sys::fs;
     namespace path = llvm::sys::path;
 
+    helpers::registerAntoraHelpers(hbs_);
+    hbs_.registerHelper("neq", helpers::ne_fn);
+
     Config const& config = corpus_.config;
-
-    js::Scope scope(ctx_);
-
-    scope.script(files::getFileText(
-        files::appendPath(
-            config->addonsDir, "js", "handlebars.js")
-        ).value()).maybeThrow();
-    auto Handlebars = scope.getGlobal("Handlebars").value();
-
-// VFALCO refactor this
-Handlebars.setlog();
 
     // load templates
 #if 0
@@ -76,8 +68,8 @@ Handlebars.setlog();
             auto text = files::getFileText(pathName);
             if(! text)
                 return text.error();
-            return Handlebars.callProp(
-                "registerPartial", name, *text).error();
+            hbs_.registerPartial(name, *text);
+            return Error::success();
         }).maybeThrow();
 
     // load helpers
@@ -98,6 +90,7 @@ Handlebars.setlog();
         }).maybeThrow();
 #endif
 
+#if 0
     scope.script(R"(
         Handlebars.registerHelper(
             'to_string', function(context, depth)
@@ -135,6 +128,7 @@ Handlebars.setlog();
             return a && b;
         });
     )").maybeThrow();
+#endif
 }
 
 //------------------------------------------------
@@ -147,26 +141,15 @@ callTemplate(
 {
     Config const& config = corpus_.config;
 
-    js::Scope scope(ctx_);
-    auto Handlebars = scope.getGlobal("Handlebars");
     auto layoutDir = files::appendPath(config->addonsDir,
             "generator", "asciidoc", "layouts");
     auto pathName = files::appendPath(layoutDir, name);
     auto fileText = files::getFileText(pathName);
     if(! fileText)
         return fileText.error();
-    dom::Object options;
-    options.set("noEscape", true);
-    options.set("allowProtoPropertiesByDefault", true);
-    // VFALCO This makes Proxy objects stop working
-    //options.set("allowProtoMethodsByDefault", true);
-    auto templateFn = Handlebars->callProp("compile", *fileText, options);
-    if(! templateFn)
-        return templateFn.error();
-    auto result = templateFn->call(context, options);
-    if(! result)
-        return result.error();
-    return result->getString();
+    HandlebarsOptions options;
+    options.noEscape = true;
+    return hbs_.render(*fileText, context, options);
 }
 
 Expected<std::string>

@@ -75,26 +75,14 @@ post(
         [sp = std::make_shared<
             any_callable<void(void)>>(std::move(f))]
         {
-            try
-            {
-                (*sp)();
-            }
-            catch(std::exception const& ex)
-            {
-                reportUnhandledException(ex);
-            }
+            // do NOT catch exceptions here
+            (*sp)();
         });
         return;
     }
 
-    try
-    {
-        f();
-    }
-    catch(std::exception const& ex)
-    {
-        reportUnhandledException(ex);
-    }
+    // do NOT catch exceptions here
+    f();
 }
 
 //------------------------------------------------
@@ -163,45 +151,42 @@ TaskGroup::
 post(
     any_callable<void(void)> f)
 {
-    if(! impl_->taskGroup)
+    if(impl_->taskGroup)
     {
-        try
+        impl_->taskGroup->async(
+        [&, sp = std::make_shared<
+            any_callable<void(void)>>(std::move(f))]
         {
-            f();
-        }
-        catch(Exception const& ex)
-        {
-            std::lock_guard<std::mutex> lock(impl_->mutex);
-            impl_->errors.emplace(ex.error());
-        }
-        catch(std::exception const& ex)
-        {
-            reportUnhandledException(ex);
-        }
+            try
+            {
+                (*sp)();
+            }
+            catch(Exception const& ex)
+            {
+                std::lock_guard<std::mutex> lock(impl_->mutex);
+                impl_->errors.emplace(ex.error());
+            }
+            catch(std::exception const& ex)
+            {
+                std::lock_guard<std::mutex> lock(impl_->mutex);
+                impl_->errors.emplace(Error(ex));
+            }
+        });
         return;
     }
-    impl_->taskGroup->async(
-    [&, sp = std::make_shared<
-        any_callable<void(void)>>(std::move(f))]
+
+    try
     {
-        try
-        {
-            (*sp)();
-        }
-        catch(Exception const& ex)
-        {
-            std::lock_guard<std::mutex> lock(impl_->mutex);
-            impl_->errors.emplace(ex.error());
-        }
-        catch(std::exception const& ex)
-        {
-            // Any exception which is not
-            // derived from Error should
-            // be reported and terminate
-            // the process immediately.
-            reportUnhandledException(ex);
-        }
-    });
+        f();
+    }
+    catch(Exception const& ex)
+    {
+        impl_->errors.emplace(ex.error());
+    }
+    catch(std::exception const& ex)
+    {
+        impl_->errors.emplace(Error(ex));
+    }
 }
 
 } // mrdox
