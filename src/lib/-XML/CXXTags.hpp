@@ -262,7 +262,7 @@ writeType(
             if constexpr(T::isSpecialization())
             {
                 for(const auto& targ : t.TemplateArgs)
-                    writeTemplateArg(targ, tags);
+                    writeTemplateArg(*targ, tags);
             }
 
             if constexpr(requires { t.PointeeType; })
@@ -324,70 +324,60 @@ inline void writeParam(Param const& P, XMLTags& tags)
 
 inline void writeTemplateParam(const TParam& I, XMLTags& tags)
 {
-    switch(I.Kind)
-    {
-    case TParamKind::Type:
-    {
-        const auto& t = I.get<TypeTParam>();
+    visit(I, [&]<typename T>(const T& P)
+        {
+            Attributes attrs = {
+                {"name", P.Name, ! P.Name.empty()},
+                {"class", toString(T::kind_id)}
+            };
 
-        std::string default_val;
-        if(t.Default)
-            default_val = toString(*t.Default);
+            if constexpr(T::isNonType())
+                attrs.push({"type", toString(*P.Type)});
+                
+            if(P.Default)
+                attrs.push({"default", toString(*P.Default)});
 
-        tags.write(tparamTagName, {}, {
-            { "name", I.Name, ! I.Name.empty() },
-            { "class", "type" },
-            { "default", default_val, ! default_val.empty() }
+            if constexpr(T::isTemplate())
+            {
+                tags.open(tparamTagName, 
+                    std::move(attrs));
+                for(const auto& tparam : P.Params)
+                    writeTemplateParam(*tparam, tags);
+                tags.close(tparamTagName);
+            }
+            else
+            {
+                tags.write(tparamTagName, {}, 
+                    std::move(attrs));
+            }
         });
-        break;
-    }
-    case TParamKind::NonType:
-    {
-        const auto& t = I.get<NonTypeTParam>();
-        std::string_view default_val;
-        if(t.Default)
-            default_val = t.Default.value();
-
-        tags.write(tparamTagName, {}, {
-            { "name", I.Name, ! I.Name.empty() },
-            { "class", "non-type" },
-            // KRYSTIAN FIXME: we can use writeType if really care
-            { "type", toString(*t.Type) },
-            { "default", default_val, ! default_val.empty() }
-        });
-        break;
-    }
-    case TParamKind::Template:
-    {
-        const auto& t = I.get<TemplateTParam>();
-        std::string_view default_val;
-        if(t.Default)
-            default_val = t.Default.value();
-        tags.open(tparamTagName, {
-            { "name", I.Name, ! I.Name.empty() },
-            { "class", "template" },
-            { "default", default_val, ! default_val.empty() }
-        });
-        for(const auto& P : t.Params)
-            writeTemplateParam(P, tags);
-        tags.close(tparamTagName);
-        break;
-    }
-    default:
-    {
-        tags.write(tparamTagName, {}, {
-            { "name", I.Name, ! I.Name.empty() }
-        });
-        break;
-    }
-    }
 }
 
 inline void writeTemplateArg(const TArg& I, XMLTags& tags)
 {
-    tags.write(targTagName, {}, {
-        { "value", I.Value }
-    });
+    visit(I, [&]<typename T>(const T& A)
+        {
+            Attributes attrs = {
+                {"class", toString(T::kind_id)}
+            };
+
+            if constexpr(T::isType())
+            {
+                attrs.push({"type", toString(*A.Type)});
+            }
+            if constexpr(T::isNonType())
+            {
+                attrs.push({"value", A.Value.Written});
+            }
+            if constexpr(T::isTemplate())
+            {
+                attrs.push({"name", A.Name});
+                attrs.push({A.Template});
+            }
+                
+            tags.write(targTagName, {}, 
+                std::move(attrs));
+        });
 }
 
 /** Return the xml tag name for the Info.

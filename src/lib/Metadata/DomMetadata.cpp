@@ -198,11 +198,12 @@ public:
 //
 //------------------------------------------------
 
-static dom::Value domCreate(TArg const&, DomCorpus const&);
-static dom::Value domCreate(TParam const&, DomCorpus const&);
+static dom::Value domCreate(
+    std::unique_ptr<TArg> const&, DomCorpus const&);
+static dom::Value domCreate(
+    std::unique_ptr<TParam> const&, DomCorpus const&);
 static dom::Value domCreate(
     std::unique_ptr<TemplateInfo> const& I, DomCorpus const&);
-static dom::Value getTParamDefault(TParam const& I, DomCorpus const&);
 
 //------------------------------------------------
 
@@ -210,12 +211,12 @@ static dom::Value getTParamDefault(TParam const& I, DomCorpus const&);
 */
 class DomTArgArray : public dom::ArrayImpl
 {
-    std::vector<TArg> const& list_;
+    std::vector<std::unique_ptr<TArg>> const& list_;
     DomCorpus const& domCorpus_;
 
 public:
     DomTArgArray(
-        std::vector<TArg> const& list,
+        std::vector<std::unique_ptr<TArg>> const& list,
         DomCorpus const& domCorpus) noexcept
         : list_(list)
         , domCorpus_(domCorpus)
@@ -238,12 +239,12 @@ public:
 */
 class DomTParamArray : public dom::ArrayImpl
 {
-    std::vector<TParam> const& list_;
+    std::vector<std::unique_ptr<TParam>> const& list_;
     DomCorpus const& domCorpus_;
 
 public:
     DomTParamArray(
-        std::vector<TParam> const& list,
+        std::vector<std::unique_ptr<TParam>> const& list,
         DomCorpus const& domCorpus) noexcept
         : list_(list)
         , domCorpus_(domCorpus)
@@ -266,32 +267,78 @@ public:
 static
 dom::Value
 domCreate(
-    TArg const& I, DomCorpus const& domCorpus)
+    std::unique_ptr<TArg> const& I, 
+    DomCorpus const& domCorpus)
 {
-    return dom::Object({
-        { "value", dom::stringOrNull(I.Value) }
-    });
+    if(! I)
+        return nullptr;
+    dom::Object::storage_type entries = {
+        { "kind", toString(I->Kind) },
+        { "is-pack", I->IsPackExpansion }
+    };
+    visit(*I, [&]<typename T>(const T& t)
+        {
+            if constexpr(T::isType())
+            {
+                entries.emplace_back("type", 
+                    domCreate(t.Type, domCorpus));
+            }
+            if constexpr(T::isNonType())
+            {
+                entries.emplace_back("value", 
+                    t.Value.Written);
+            }
+            if constexpr(T::isTemplate())
+            {
+                entries.emplace_back("name", 
+                    t.Name);
+                // KRYSTIAN NOTE: hack for missing SymbolIDs
+                if(t.Template != SymbolID::zero && 
+                    domCorpus.corpus.find(t.Template))
+                    entries.emplace_back("template", 
+                        toBase16(t.Template));
+            }
+        });
+    return dom::Object(std::move(entries));
 }
 
 static
 dom::Value
 domCreate(
-    TParam const& I,
+    std::unique_ptr<TParam> const& I,
     DomCorpus const& domCorpus)
 {
-    return dom::Object({
-        { "kind", toString(I.Kind)},
-        { "name", dom::stringOrNull(I.Name)},
-        { "is-pack", I.IsParameterPack},
-        { "type", I.Kind == TParamKind::NonType
-            ? domCreate(I.get<NonTypeTParam>().Type, domCorpus)
-            : dom::Value()},
-        { "params", I.Kind == TParamKind::Template
-            ? dom::newArray<DomTParamArray>(
-                I.get<TemplateTParam>().Params, domCorpus)
-            : dom::Value()},
-        { "default", getTParamDefault(I, domCorpus) }
-    });
+    if(! I)
+        return nullptr;
+    dom::Object::storage_type entries = {
+        { "kind", toString(I->Kind) },
+        { "name", dom::stringOrNull(I->Name) },
+        { "is-pack", I->IsParameterPack }
+    };
+    visit(*I, [&]<typename T>(const T& t)
+        {
+            if(t.Default)
+                entries.emplace_back("default", 
+                    domCreate(t.Default, domCorpus));
+
+            if constexpr(T::isType())
+            {
+                entries.emplace_back("key", 
+                    toString(t.KeyKind));
+            }
+            if constexpr(T::isNonType())
+            {
+                entries.emplace_back("type", 
+                    domCreate(t.Type, domCorpus));
+            }
+            if constexpr(T::isTemplate())
+            {
+                entries.emplace_back("params",
+                    dom::newArray<DomTParamArray>(
+                        t.Params, domCorpus));
+            }
+        });
+    return dom::Object(std::move(entries));
 }
 
 static
@@ -300,33 +347,14 @@ domCreate(
     std::unique_ptr<TemplateInfo> const& I,
     DomCorpus const& domCorpus)
 {
-    if(I)
-        return dom::Object({
-            { "kind", toString(I->specializationKind()) },
-            { "primary", domCorpus.getOptional(*I->Primary) },
-            { "params", dom::newArray<DomTParamArray>( I->Params, domCorpus) },
-            { "args", dom::newArray<DomTArgArray>(I->Args, domCorpus) }
-            });
-    return nullptr;
-}
-
-static
-dom::Value
-getTParamDefault(
-    TParam const& I,
-    DomCorpus const& domCorpus)
-{
-    switch(I.Kind)
-    {
-    case TParamKind::Type:
-        return domCreate(I.get<TypeTParam>().Default, domCorpus);
-    case TParamKind::NonType:
-        return dom::Value(I.get<NonTypeTParam>().Default);
-    case TParamKind::Template:
-        return dom::Value(I.get<TemplateTParam>().Default);
-    default:
-        MRDOX_UNREACHABLE();
-    }
+    if(! I)
+        return nullptr;
+    return dom::Object({
+        { "kind", toString(I->specializationKind()) },
+        { "primary", domCorpus.getOptional(*I->Primary) },
+        { "params", dom::newArray<DomTParamArray>( I->Params, domCorpus) },
+        { "args", dom::newArray<DomTArgArray>(I->Args, domCorpus) }
+        });
 }
 
 //------------------------------------------------

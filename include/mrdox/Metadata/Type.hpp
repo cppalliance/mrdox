@@ -123,7 +123,7 @@ struct SpecializationTypeInfo
     std::unique_ptr<TypeInfo> ParentType;
     std::string Name;
     SymbolID id = SymbolID::zero;
-    std::vector<TArg> TemplateArgs;
+    std::vector<std::unique_ptr<TArg>> TemplateArgs;
 };
 
 struct LValueReferenceTypeInfo
@@ -178,7 +178,7 @@ struct PackTypeInfo
 
 template<typename F, typename... Args>
 constexpr
-auto
+decltype(auto)
 visit(
     TypeInfo& I,
     F&& f,
@@ -223,7 +223,7 @@ visit(
 
 template<typename F, typename... Args>
 constexpr
-auto
+decltype(auto)
 visit(
     const TypeInfo& I,
     F&& f,

@@ -16,6 +16,7 @@
 #include <mrdox/Platform.hpp>
 #include <mrdox/ADT/Optional.hpp>
 #include <mrdox/Metadata/Type.hpp>
+#include <mrdox/Support/TypeTraits.hpp>
 #include <optional>
 #include <string>
 #include <vector>
@@ -23,171 +24,235 @@
 namespace clang {
 namespace mrdox {
 
+enum class TArgKind : int
+{
+    // type arguments
+    Type = 1, // for bitstream
+    // non-type arguments, i.e. expressions
+    NonType,
+    // template template arguments, i.e. template names
+    Template
+};
+
+MRDOX_DECL std::string_view toString(TArgKind kind) noexcept;
+
+struct TArg
+{
+    /** The kind of template argument this is. */
+    TArgKind Kind;
+
+    /** Whether this template argument is a parameter expansion. */
+    bool IsPackExpansion = false;
+
+    constexpr virtual ~TArg() = default;
+
+    constexpr bool isType()     const noexcept { return Kind == TArgKind::Type; }
+    constexpr bool isNonType()  const noexcept { return Kind == TArgKind::NonType; }
+    constexpr bool isTemplate() const noexcept { return Kind == TArgKind::Template; }
+
+protected:
+    constexpr
+    TArg(
+        TArgKind kind) noexcept
+        : Kind(kind)
+    {
+    }
+};
+
+template<TArgKind K>
+struct IsTArg : TArg
+{
+    static constexpr TArgKind kind_id = K;
+
+    static constexpr bool isType()     noexcept { return K == TArgKind::Type; }
+    static constexpr bool isNonType()  noexcept { return K == TArgKind::NonType; }
+    static constexpr bool isTemplate() noexcept { return K == TArgKind::Template; }
+
+protected:
+    constexpr
+    IsTArg() noexcept
+        : TArg(K)
+    {
+    }
+};
+
+struct TypeTArg
+    : IsTArg<TArgKind::Type>
+{
+    /** Template argument type. */
+    std::unique_ptr<TypeInfo> Type;
+};
+
+struct NonTypeTArg
+    : IsTArg<TArgKind::NonType>
+{
+    /** Template argument expression. */
+    ExprInfo Value;
+};
+
+struct TemplateTArg
+    : IsTArg<TArgKind::Template>
+{
+    /** SymbolID of the referenced template. */
+    SymbolID Template;
+
+    /** Name of the referenced template. */
+    std::string Name;
+};
+
+template<
+    typename TArgTy,
+    typename F,
+    typename... Args>
+    requires std::derived_from<TArgTy, TArg>
+constexpr
+decltype(auto)
+visit(
+    TArgTy& A,
+    F&& f,
+    Args&&... args)
+{
+    switch(A.Kind)
+    {
+    case TArgKind::Type:
+        return f(static_cast<add_cv_from_t<
+            TArgTy, TypeTArg>&>(A),
+            std::forward<Args>(args)...);
+    case TArgKind::NonType:
+        return f(static_cast<add_cv_from_t<
+            TArgTy, NonTypeTArg>&>(A),
+            std::forward<Args>(args)...);
+    case TArgKind::Template:
+        return f(static_cast<add_cv_from_t<
+            TArgTy, TemplateTArg>&>(A),
+            std::forward<Args>(args)...);
+    default:
+        MRDOX_UNREACHABLE();
+    }
+}
+
+MRDOX_DECL std::string toString(const TArg& arg) noexcept;
+
+// ----------------------------------------------------------------
+
 enum class TParamKind : int
 {
-    // empty state, only used when constructing TParams
-    None,
     // template type parameter, e.g. "typename T" or "class T"
-    Type,
+    Type = 1, // for bitstream
     // template non-type parameter, e.g. "int N" or "auto N"
     NonType,
     // template template parameter, e.g. "template<typename> typename T"
     Template
 };
 
-MRDOX_DECL dom::String toString(TParamKind kind) noexcept;
-
-struct TParam;
-
-struct TypeTParam
-{
-    /** Default type for the type template parameter */
-    std::unique_ptr<TypeInfo> Default;
-};
-
-struct NonTypeTParam
-{
-    /** Type of the non-type template parameter */
-    std::unique_ptr<TypeInfo> Type;
-    // Non-type template parameter default value (if any)
-    Optional<std::string> Default;
-};
-
-struct TemplateTParam
-{
-    /** Template parameters for the template template parameter */
-    std::vector<TParam> Params;
-    /** Non-type template parameter default value (if any) */
-    Optional<std::string> Default;
-};
-
-// ----------------------------------------------------------------
+MRDOX_DECL std::string_view toString(TParamKind kind) noexcept;
 
 struct TParam
 {
-private:
-    union Variant
-    {
-        Variant() { }
-        ~Variant() { }
+    /** The kind of template parameter this is */
+    TParamKind Kind;
 
-        TypeTParam Type;
-        NonTypeTParam NonType;
-        TemplateTParam Template;
-    } Variant_;
-
-    void destroy() const noexcept;
-
-    template<typename T>
-    void
-    construct(T&& other)
-    {
-        switch(other.Kind)
-        {
-        case TParamKind::Type:
-            emplace<TypeTParam>(
-                std::forward<T>(other).Variant_.Type);
-            break;
-        case TParamKind::NonType:
-            emplace<NonTypeTParam>(
-                std::forward<T>(other).Variant_.NonType);
-            break;
-        case TParamKind::Template:
-            emplace<TemplateTParam>(
-                std::forward<T>(other).Variant_.Template);
-            break;
-        default:
-            break;
-        }
-    }
-
-public:
-    /** The kind of template parameter this is. */
-    TParamKind Kind = TParamKind::None;
     /** The template parameters name, if any */
     std::string Name;
-    /** Whether this template parameter is a parameter pack. */
+
+    /** Whether this template parameter is a parameter pack */
     bool IsParameterPack = false;
 
+    /** The default template argument, if any */
+    std::unique_ptr<TArg> Default;
 
-    TParam() = default;
+    virtual ~TParam() = default;
 
-    MRDOX_DECL
+    constexpr bool isType()     const noexcept { return Kind == TParamKind::Type; }
+    constexpr bool isNonType()  const noexcept { return Kind == TParamKind::NonType; }
+    constexpr bool isTemplate() const noexcept { return Kind == TParamKind::Template; }
+
+protected:
+    constexpr
     TParam(
-        TParam&& other) noexcept;
-
-    MRDOX_DECL
-    TParam(
-        std::string&& name,
-        bool is_pack);
-
-    MRDOX_DECL ~TParam();
-
-    MRDOX_DECL
-    TParam&
-    operator=(
-        TParam&& other) noexcept;
-
-    template<typename T, typename... Args>
-    auto&
-    emplace(Args&&... args)
+        TParamKind kind) noexcept
+        : Kind(kind)
     {
-        using U = std::remove_cvref_t<T>;
-        if constexpr(std::is_same_v<U, TypeTParam>)
-            Kind = TParamKind::Type;
-        else if constexpr(std::is_same_v<U, NonTypeTParam>)
-            Kind = TParamKind::NonType;
-        else if constexpr(std::is_same_v<U, TemplateTParam>)
-            Kind = TParamKind::Template;
-        else
-            MRDOX_ASSERT(! "invalid template parameter kind");
-        return *::new (static_cast<void*>(&Variant_)) T(
-            std::forward<Args>(args)...);
-    }
-
-    template<typename T>
-    auto& get() noexcept
-    {
-        using U = std::remove_cvref_t<T>;
-        if constexpr(std::is_same_v<U, TypeTParam>)
-            return Variant_.Type;
-        else if constexpr(std::is_same_v<U, NonTypeTParam>)
-            return Variant_.NonType;
-        else if constexpr(std::is_same_v<U, TemplateTParam>)
-            return Variant_.Template;
-        else
-            MRDOX_ASSERT(! "invalid template parameter kind");
-    }
-
-    template<typename T>
-    const auto& get() const noexcept
-    {
-        using U = std::remove_cvref_t<T>;
-        if constexpr(std::is_same_v<U, TypeTParam>)
-            return Variant_.Type;
-        else if constexpr(std::is_same_v<U, NonTypeTParam>)
-            return Variant_.NonType;
-        else if constexpr(std::is_same_v<U, TemplateTParam>)
-            return Variant_.Template;
-        else
-            MRDOX_ASSERT(! "invalid template parameter kind");
     }
 };
 
-// ----------------------------------------------------------------
-
-struct TArg
+template<TParamKind K>
+struct IsTParam : TParam
 {
-    std::string Value;
+    static constexpr TParamKind kind_id = K;
 
-    TArg() = default;
+    static constexpr bool isType()     noexcept { return K == TParamKind::Type; }
+    static constexpr bool isNonType()  noexcept { return K == TParamKind::NonType; }
+    static constexpr bool isTemplate() noexcept { return K == TParamKind::Template; }
 
-    MRDOX_DECL
-    TArg(std::string&& value);
+protected:
+    constexpr
+    IsTParam() noexcept
+        : TParam(K)
+    {
+    }
 };
 
-// ----------------------------------------------------------------
+/** The keyword a template parameter was declared with */
+enum class TParamKeyKind : int
+{
+    Class = 0,
+    Typename
+};
 
+MRDOX_DECL std::string_view toString(TParamKeyKind kind) noexcept;
+
+struct TypeTParam
+    : IsTParam<TParamKind::Type>
+{
+    /** Keyword (class/typename) the parameter uses **/
+    TParamKeyKind KeyKind = TParamKeyKind::Class;
+};
+
+struct NonTypeTParam
+    : IsTParam<TParamKind::NonType>
+{
+    /** Type of the non-type template parameter */
+    std::unique_ptr<TypeInfo> Type;
+};
+
+struct TemplateTParam
+    : IsTParam<TParamKind::Template>
+{
+    /** Template parameters for the template template parameter */
+    std::vector<std::unique_ptr<TParam>> Params;
+};
+
+template<
+    typename TParamTy,
+    typename F,
+    typename... Args>
+    requires std::derived_from<TParamTy, TParam>
+constexpr
+decltype(auto)
+visit(
+    TParamTy& P,
+    F&& f,
+    Args&&... args)
+{
+    switch(P.Kind)
+    {
+    case TParamKind::Type:
+        return f(static_cast<add_cv_from_t<
+            TParamTy, TypeTParam>&>(P),
+            std::forward<Args>(args)...);
+    case TParamKind::NonType:
+        return f(static_cast<add_cv_from_t<
+            TParamTy, NonTypeTParam>&>(P),
+            std::forward<Args>(args)...);
+    case TParamKind::Template:
+        return f(static_cast<add_cv_from_t<
+            TParamTy, TemplateTParam>&>(P),
+            std::forward<Args>(args)...);
+    default:
+        MRDOX_UNREACHABLE();
+    }
+}
 
 // ----------------------------------------------------------------
 
@@ -216,8 +281,8 @@ struct TemplateInfo
            - each template parameter will appear at least
              once in Args outside of a non-deduced context
     */
-    std::vector<TParam> Params;
-    std::vector<TArg> Args;
+    std::vector<std::unique_ptr<TParam>> Params;
+    std::vector<std::unique_ptr<TArg>> Args;
 
     /** Primary template ID for partial and explicit specializations.
     */

@@ -289,11 +289,14 @@ RecordIDNameMap = []()
         {SOURCE_INFO_DEFLOC, {"SourceDefLoc", &LocationAbbrev}},
         {SOURCE_INFO_LOC,    {"SourceLoc", &LocationAbbrev}},
         {TEMPLATE_PRIMARY_USR,   {"Primary", &SymbolIDAbbrev}},
-        {TEMPLATE_ARG_VALUE,     {"Value", &StringAbbrev}},
+        {TEMPLATE_ARG_KIND,      {"TArgKind", &Integer32Abbrev}},
+        {TEMPLATE_ARG_IS_PACK,   {"IsPack", &BoolAbbrev}},
+        {TEMPLATE_ARG_TEMPLATE,  {"TemplateID", &SymbolIDAbbrev}},
+        {TEMPLATE_ARG_NAME,      {"TemplateName", &StringAbbrev}},
         {TEMPLATE_PARAM_KIND,    {"Kind", &Integer32Abbrev}},
         {TEMPLATE_PARAM_NAME,    {"Name", &StringAbbrev}},
         {TEMPLATE_PARAM_IS_PACK, {"IsPack", &BoolAbbrev}},
-        {TEMPLATE_PARAM_DEFAULT, {"Default", &StringAbbrev}},
+        {TEMPLATE_PARAM_KEY_KIND,{"TParamKeyKind", &Integer32Abbrev}},
         {TYPEINFO_KIND, {"TypeinfoKind", &Integer32Abbrev}},
         {TYPEINFO_ID, {"TypeinfoID", &SymbolIDAbbrev}},
         {TYPEINFO_NAME, {"TypeinfoName", &StringAbbrev}},
@@ -368,14 +371,15 @@ RecordsByBlock{
         RECORD_FRIENDS, RECORD_MEMBERS, RECORD_SPECIALIZATIONS}},
     // TArg
     {BI_TEMPLATE_ARG_BLOCK_ID,
-        {TEMPLATE_ARG_VALUE}},
+        {TEMPLATE_ARG_KIND, TEMPLATE_ARG_IS_PACK, 
+        TEMPLATE_ARG_TEMPLATE, TEMPLATE_ARG_NAME}},
     // TemplateInfo
     {BI_TEMPLATE_BLOCK_ID,
         {TEMPLATE_PRIMARY_USR}},
     // TParam
     {BI_TEMPLATE_PARAM_BLOCK_ID,
         {TEMPLATE_PARAM_KIND, TEMPLATE_PARAM_NAME,
-        TEMPLATE_PARAM_IS_PACK, TEMPLATE_PARAM_DEFAULT}},
+        TEMPLATE_PARAM_IS_PACK, TEMPLATE_PARAM_KEY_KIND}},
     // SpecializationInfo
     {BI_SPECIALIZATION_BLOCK_ID,
         {SPECIALIZATION_PRIMARY, SPECIALIZATION_MEMBERS}},
@@ -1049,49 +1053,59 @@ emitBlock(
 void
 BitcodeWriter::
 emitBlock(
-    const TParam& T)
+    const std::unique_ptr<TParam>& T)
 {
     StreamSubBlockGuard Block(Stream, BI_TEMPLATE_PARAM_BLOCK_ID);
-    emitRecord(T.Kind, TEMPLATE_PARAM_KIND);
-    emitRecord(T.Name, TEMPLATE_PARAM_NAME);
-    emitRecord(T.IsParameterPack, TEMPLATE_PARAM_IS_PACK);
-    switch(T.Kind)
-    {
-    case TParamKind::Type:
-    {
-        const auto& info = T.get<TypeTParam>();
-        emitBlock(info.Default);
-        break;
-    }
-    case TParamKind::NonType:
-    {
-        const auto& info = T.get<NonTypeTParam>();
-        emitBlock(info.Type);
-        if(info.Default)
-            emitRecord(*info.Default, TEMPLATE_PARAM_DEFAULT);
-        break;
-    }
-    case TParamKind::Template:
-    {
-        const auto& info = T.get<TemplateTParam>();
-        for(const auto& P : info.Params)
-            emitBlock(P);
-        if(info.Default)
-            emitRecord(*info.Default, TEMPLATE_PARAM_DEFAULT);
-        break;
-    }
-    default:
-        break;
-    }
+    visit(*T, [&]<typename T>(const T& P)
+        {
+            emitRecord(P.Kind, TEMPLATE_PARAM_KIND);
+            emitRecord(P.Name, TEMPLATE_PARAM_NAME);
+            emitRecord(P.IsParameterPack, TEMPLATE_PARAM_IS_PACK);
+        
+            if(P.Default)
+                emitBlock(P.Default);
+            
+            if constexpr(T::isType())
+            {
+                emitRecord(P.KeyKind, TEMPLATE_PARAM_KEY_KIND);
+            }
+            if constexpr(T::isNonType())
+            {
+                emitBlock(P.Type);
+            }
+            if constexpr(T::isTemplate())
+            {
+                for(const auto& P : P.Params)
+                    emitBlock(P);
+            }
+        });
 }
 
 void
 BitcodeWriter::
 emitBlock(
-    const TArg& T)
+    const std::unique_ptr<TArg>& T)
 {
     StreamSubBlockGuard Block(Stream, BI_TEMPLATE_ARG_BLOCK_ID);
-    emitRecord(T.Value, TEMPLATE_ARG_VALUE);
+    visit(*T, [&]<typename T>(const T& A)
+        {
+            emitRecord(A.Kind, TEMPLATE_ARG_KIND);
+            emitRecord(A.IsPackExpansion, TEMPLATE_ARG_IS_PACK);
+            
+            if constexpr(T::isType())
+            {
+                emitBlock(A.Type);
+            }
+            else if constexpr(T::isNonType())
+            {
+                emitBlock(A.Value);
+            }
+            else if constexpr(T::isTemplate())
+            {
+                emitRecord(A.Template, TEMPLATE_ARG_TEMPLATE);
+                emitRecord(A.Name, TEMPLATE_ARG_NAME);
+            }
+        });
 }
 
 void

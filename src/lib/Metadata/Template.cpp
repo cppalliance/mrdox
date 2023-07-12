@@ -15,66 +15,24 @@
 namespace clang {
 namespace mrdox {
 
-void
-TParam::
-destroy() const noexcept
+std::string_view
+toString(
+    TArgKind kind) noexcept
 {
-    switch(Kind)
+    switch(kind)
     {
-    case TParamKind::Type:
-        return Variant_.Type.~TypeTParam();
-    case TParamKind::NonType:
-        return Variant_.NonType.~NonTypeTParam();
-    case TParamKind::Template:
-        return Variant_.Template.~TemplateTParam();
+    case TArgKind::Type:
+        return "type";
+    case TArgKind::NonType:
+        return "non-type";
+    case TArgKind::Template:
+        return "template";
     default:
-        return;
+        MRDOX_UNREACHABLE();
     }
 }
 
-TParam::
-TParam(
-    TParam&& other) noexcept
-    : Name(std::move(other.Name))
-    , IsParameterPack(other.IsParameterPack)
-{
-    construct(std::move(other));
-}
-
-TParam::
-TParam(
-    std::string&& name,
-    bool is_pack)
-    : Name(std::move(name))
-    , IsParameterPack(is_pack)
-{
-}
-
-TParam::
-~TParam()
-{
-    destroy();
-}
-
-TParam&
-TParam::
-operator=(TParam&& other) noexcept
-{
-    destroy();
-    construct(std::move(other));
-    Name = std::move(other.Name);
-    IsParameterPack = other.IsParameterPack;
-    return *this;
-}
-
-TArg::
-TArg(
-    std::string&& value)
-    : Value(std::move(value))
-{
-}
-
-dom::String
+std::string_view
 toString(
     TParamKind kind) noexcept
 {
@@ -87,7 +45,21 @@ toString(
     case TParamKind::Template:
         return "template";
     default:
-        // kind should never be None
+        MRDOX_UNREACHABLE();
+    }
+}
+
+std::string_view
+toString(
+    TParamKeyKind kind) noexcept
+{
+    switch(kind)
+    {
+    case TParamKeyKind::Class:
+        return "class";
+    case TParamKeyKind::Typename:
+        return "typename";
+    default:
         MRDOX_UNREACHABLE();
     }
 }
@@ -107,6 +79,34 @@ toString(
     default:
         MRDOX_UNREACHABLE();
     }
+}
+
+std::string
+toString(
+    const TArg& arg) noexcept
+{
+    return visit(arg, 
+        []<typename T>(const T& t)
+    {
+        std::string result;
+        if constexpr(T::isType())
+        {
+            if(t.Type)
+                result += toString(*t.Type);
+        }
+        if constexpr(T::isNonType())
+        {
+            result += t.Value.Written;
+        }
+        if constexpr(T::isTemplate())
+        {
+            result += t.Name;
+        }
+
+        if(t.IsPackExpansion)
+            result += "...";
+        return result;
+    });
 }
 
 } // mrdox
